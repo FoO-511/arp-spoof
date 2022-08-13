@@ -13,21 +13,6 @@ struct EthArpPacket final
 };
 #pragma pack(pop)
 
-EthArpPacket *get_mac_with_ip()
-{
-    EthArpPacket packet;
-
-    packet.eth_.dmac_ = Mac("00:00:00:00:00:00");
-    packet.eth_.smac_ = Mac();
-    packet.eth_.type_ = htons(EthHdr::Arp);
-
-    packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-    packet.arp_.pro_ = htons(EthHdr::Ip4);
-    packet.arp_.hln_ = Mac::SIZE;
-    packet.arp_.pln_ = Ip::SIZE;
-    packet.arp_.op_ = htons(ArpHdr::Request);
-    packet.arp_.smac_ = Mac("00:00:00:00:00:00");
-    packet.arp_.sip_ = htonl(Ip("0.0.0.0"));
-    packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
-    packet.arp_.tip_ = htonl(Ip("0.0.0.0"));
-}
+EthArpPacket gen_arp_req(Mac smac_, Ip sip_, Ip tip_);
+Mac get_arp_reply_mac(const u_char *packet, Mac dmac_, Ip sip_, Ip tip_);
+Mac get_mac_via_arp(pcap_t *pcap, Mac myMac, Ip myIp, Ip tip_);
