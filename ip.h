@@ -7,6 +7,7 @@
 #include <sys/ioctl.h>
 #include <linux/if.h>
 #include <netdb.h>
+#include <ifaddrs.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -43,19 +44,39 @@ struct Ip final
 		return prefix >= 0xE0 && prefix < 0xF0;
 	}
 
-	Ip getMyIp()
+	static Ip getMyIp(const char *interface)
 	{
-		struct ifreq s;
-		int fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+		struct ifaddrs *ifaddr, *ifa;
+		int family, s;
+		char host[NI_MAXHOST];
 
-		strcpy(s.ifr_name, "eth0");
-		if (0 == ioctl(fd, SIOCGIFHWADDR, &s))
+		if (getifaddrs(&ifaddr) == -1)
 		{
-			int i;
-			for (i = 0; i < 6; ++i)
-				printf(" %02x", (unsigned char)s.ifr_addr.sa_data[i]);
-			puts("\n");
+			perror("getifaddrs");
+			exit(EXIT_FAILURE);
 		}
+
+		for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+		{
+			if (ifa->ifa_addr == NULL)
+				continue;
+
+			s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+
+			if ((strcmp(ifa->ifa_name, interface) == 0) && (ifa->ifa_addr->sa_family == AF_INET))
+			{
+				if (s != 0)
+				{
+					printf("getnameinfo() failed: %s\n", gai_strerror(s));
+					exit(EXIT_FAILURE);
+				}
+				return Ip(host);
+			}
+		}
+
+		freeifaddrs(ifaddr);
+		exit(EXIT_SUCCESS);
+
 		return Ip("0.0.0.0");
 	}
 
