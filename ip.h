@@ -1,15 +1,5 @@
 #pragma once
-
-#include <cstdint>
-#include <string>
-
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <linux/if.h>
-#include <netdb.h>
-#include <ifaddrs.h>
-#include <stdio.h>
-#include <string.h>
+#include "pch.h"
 
 struct Ip final
 {
@@ -79,7 +69,7 @@ struct Ip final
 
 		return Ip("0.0.0.0");
 	}
-
+	// operator가 없는 이유는 ip 자체가 비교가 가능한 자료형으로 구성되어 있기 때문.
 protected:
 	uint32_t ip_;
 };

@@ -1,8 +1,5 @@
 #pragma once
-
-#include <cstdint>
-#include <cstring>
-#include <string>
+#include "pch.h"
 
 // ----------------------------------------------------------------------------
 // Mac
@@ -14,6 +11,8 @@ struct Mac final
 	// constructor
 	Mac() {}
 	Mac(const Mac &r) { memcpy(this->mac_, r.mac_, SIZE); }
+	// copy constructor
+	// 왜 call by reference를 하냐: 안하면 또 복사가 되기 때문..(?)
 	Mac(const uint8_t *r) { memcpy(this->mac_, r, SIZE); }
 	Mac(const std::string &r);
 
@@ -57,13 +56,17 @@ struct Mac final
 		return mac_[0] == 0x01 && mac_[1] == 0x00 && mac_[2] == 0x5E && (mac_[3] & 0x80) == 0x00;
 	}
 
-	static Mac getMyMac(const char *addr_path)
+	static Mac getMyMac(const char *interface)
 	{
+		std::string mac_addr_path = "/sys/class/net/";
+		mac_addr_path += interface;
+		mac_addr_path += "/address";
+
 		FILE *stream;
 		char buffer[18];
 		int num;
 
-		if ((stream = fopen(addr_path, "r")) != NULL)
+		if ((stream = fopen(mac_addr_path.c_str(), "r")) != NULL)
 		{
 			memset(buffer, 0, sizeof(buffer));
 			num = fread(buffer, sizeof(char), 18, stream);
@@ -82,7 +85,7 @@ struct Mac final
 		else
 			perror("Error opening myfile");
 
-		return Mac(buffer);
+		return Mac(buffer); // 문자열 말고 바이트로 입력 받을 것. 문자열은 오래걸림.
 	}
 
 	static Mac randomMac();

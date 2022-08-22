@@ -1,15 +1,21 @@
 #pragma once
 
-#include <cstdio>
-#include <pcap.h>
+#include "pch.h"
 #include "ethhdr.h"
 #include "arphdr.h"
+#include "iphdr.h"
 
 #pragma pack(push, 1)
 struct EthArpPacket final
 {
     EthHdr eth_;
     ArpHdr arp_;
+};
+
+struct EthIpPacket final
+{
+    EthHdr eth_;
+    IpHdr ip_;
 };
 
 struct ArpReqs
@@ -63,6 +69,9 @@ void *t_get_mac_via_arp(void *argv);
 
 int send_arp_reply(pcap_t *pcap, EthArpPacket packet);
 void *t_send_arp_replys(void *argv);
+
+int arp_reply_to_req(const u_char *packet);
+int relay_ip_packet(const u_char *packet);
 
 int arp_spoof(ArpSpoofReqs arpSpoofReqs);
 void *t_arp_spoof(void *argv);
